@@ -1,0 +1,12 @@
+[workspace]
+resolver = "3"
+members = ["gb_core", "gb_desktop"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+rust-version = "1.85"
+
+[workspace.dependencies]
+gb_core = { path = "gb_core" }

@@ -1,36 +1,114 @@
-name: Multi-Model AI Code Review
+name: AI Code Review
 
 on:
   pull_request:
     types: [opened, reopened, synchronize]
 
 jobs:
-  gemini-review:
+  ai-review:
     if: github.event.pull_request.head.repo.fork == false
     runs-on: ubuntu-latest
     permissions:
       pull-requests: write
       contents: read
+    strategy:
+      matrix:
+        include:
+          - name: gemini-3.5-flash
+            step_name: gemini-3.5-flash
+            model: gemini-3.5-flash
+            api_url: https://generativelanguage.googleapis.com/v1beta/openai/chat/completions
+            api_key_secret: GEMINI_API_KEY
+            label: Gemini
+          - name: openrouter-review
+            step_name: OpenRouter Code Review
+            model: openrouter/free
+            api_url: https://openrouter.ai/api/v1/chat/completions
+            api_key_secret: OPENROUTER_API_KEY
+            label: OpenRouter
     steps:
-      - name: Run PR Agent (Gemini)
-        uses: The-PR-Agent/pr-agent@main
+      - uses: actions/checkout@v4
+      - name: ${{ matrix.step_name }}
         env:
-          OPENAI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-          OPENAI_API_BASE: "https://generativelanguage.googleapis.com/v1beta/openai/"
-          OPENAI_MODEL: "gemini-2.5-flash"
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          API_KEY: ${{ secrets[matrix.api_key_secret] }}
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          PR_NUMBER=${{ github.event.pull_request.number }}
 
-  openrouter-review:
-    if: github.event.pull_request.head.repo.fork == false
-    runs-on: ubuntu-latest
-    permissions:
-      pull-requests: write
-      contents: read
-    steps:
-      - name: Run Open-Rabbit (DeepSeek)
-        uses: stwise/open-rabbit@main
-        env:
-          AI_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
-          AI_BASE_URL: "https://openrouter.ai/api/v1"
-          AI_MODEL: "deepseek/deepseek-chat:free"
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          if [ -z "$API_KEY" ]; then
+            echo "::error::${{ matrix.label }}: API key (${{ matrix.api_key_secret }}) is not set"
+            BODY="## ${{ matrix.label }} Code Review – Error
+
+          API key is not configured. Please set the ${{ matrix.api_key_secret }} secret."
+            gh pr comment "$PR_NUMBER" --body "$BODY"
+            exit 1
+          fi
+
+          gh pr diff "$PR_NUMBER" > /tmp/pr_diff.txt || {
+            BODY="## ${{ matrix.label }} Code Review – Error
+
+          Failed to fetch PR diff."
+            gh pr comment "$PR_NUMBER" --body "$BODY"
+            exit 1
+          }
+          python3 -c "
+          import sys
+          with open('/tmp/pr_diff.txt', 'rb') as f:
+              data = f.read(100000)
+              text = data.decode('utf-8', errors='replace')
+              sys.stdout.write(text)
+          " > /tmp/pr_diff_truncated.txt
+
+          jq -n --rawfile diff /tmp/pr_diff_truncated.txt '{
+            "model": "${{ matrix.model }}",
+            "messages": [
+              {
+                "role": "system",
+                "content": "You are an expert Rust code reviewer. Provide constructive, actionable feedback."
+              },
+              {
+                "role": "user",
+                "content": "Review this pull request diff:\n\n\($diff)"
+              }
+            ]
+          }' > /tmp/payload.json
+
+          HTTP_CODE=""
+          BODY=""
+          for try in 1 2 3; do
+            RESPONSE=$(curl -s -w "\n%{http_code}" -X POST "${{ matrix.api_url }}" \
+              -H "Content-Type: application/json" \
+              -H "Authorization: Bearer $API_KEY" \
+              -d @/tmp/payload.json)
+            HTTP_CODE=$(echo "$RESPONSE" | tail -1)
+            BODY=$(echo "$RESPONSE" | sed '$d')
+
+            if [ "$HTTP_CODE" = "200" ]; then
+              break
+            fi
+
+            if [ "$try" -lt 3 ]; then
+              sleep $((try * 5))
+              continue
+            fi
+
+            break
+          done
+
+          if [ "$HTTP_CODE" != "200" ]; then
+            echo "::error::${{ matrix.label }}: API returned HTTP $HTTP_CODE"
+            echo "$BODY" | python3 -c "import sys; sys.stdout.write(sys.stdin.read(500))" 2>/dev/null || true
+            ERROR_MSG=$(echo "$BODY" | jq -e -r '.error.message' 2>/dev/null || echo "API request failed")
+            BODY="## ${{ matrix.label }} Code Review – Error
+
+            API returned ${HTTP_CODE}: ${ERROR_MSG}"
+            gh pr comment "$PR_NUMBER" --body "$BODY"
+            exit 1
+          fi
+
+          REVIEW=$(echo "$BODY" | jq -e -r '.choices[0].message.content' 2>/dev/null || echo "No review generated")
+          gh pr comment "$PR_NUMBER" --body "## ${{ matrix.label }} Code Review
+
+          ${REVIEW}"

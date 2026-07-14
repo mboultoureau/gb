@@ -2,16 +2,16 @@
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct Registers {
-    a: u8,
-    b: u8,
-    c: u8,
-    d: u8,
-    e: u8,
+    pub a: u8,
+    pub b: u8,
+    pub c: u8,
+    pub d: u8,
+    pub e: u8,
     f: u8,
-    h: u8,
-    l: u8,
-    sp: u16,
-    pc: u16,
+    pub h: u8,
+    pub l: u8,
+    pub sp: u16,
+    pub pc: u16,
 }
 
 impl Registers {
@@ -20,40 +20,48 @@ impl Registers {
     pub const FLAG_H: u8 = 1 << 5;
     pub const FLAG_C: u8 = 1 << 4;
 
+    #[inline]
     pub fn af(&self) -> u16 {
         u16::from_be_bytes([self.a, self.f])
     }
 
+    #[inline]
     pub fn set_af(&mut self, value: u16) {
         let [high, low] = value.to_be_bytes();
         self.a = high;
-        self.f = low & 0xF0; // Only the upper 4 bits are used
+        self.f = low & 0xF0;
     }
 
+    #[inline]
     pub fn bc(&self) -> u16 {
         u16::from_be_bytes([self.b, self.c])
     }
 
+    #[inline]
     pub fn set_bc(&mut self, value: u16) {
         let [high, low] = value.to_be_bytes();
         self.b = high;
         self.c = low;
     }
 
+    #[inline]
     pub fn de(&self) -> u16 {
         u16::from_be_bytes([self.d, self.e])
     }
 
+    #[inline]
     pub fn set_de(&mut self, value: u16) {
         let [high, low] = value.to_be_bytes();
         self.d = high;
         self.e = low;
     }
 
+    #[inline]
     pub fn hl(&self) -> u16 {
         u16::from_be_bytes([self.h, self.l])
     }
 
+    #[inline]
     pub fn set_hl(&mut self, value: u16) {
         let [high, low] = value.to_be_bytes();
         self.h = high;
@@ -68,9 +76,9 @@ impl Registers {
     #[inline]
     pub fn set_flag(&mut self, mask: u8, value: bool) {
         if value {
-            self.f |= mask
+            self.f |= mask;
         } else {
-            self.f &= !mask
+            self.f &= !mask;
         }
     }
 
@@ -174,6 +182,35 @@ mod tests {
         reg.set_carry(false);
         assert!(!reg.carry());
         assert_eq!(reg.f, 0);
+    }
+
+    #[test]
+    fn test_sp_and_pc() {
+        let reg = Registers {
+            sp: 0xFFFE,
+            pc: 0x0100,
+            ..Default::default()
+        };
+        assert_eq!(reg.sp, 0xFFFE);
+        assert_eq!(reg.pc, 0x0100);
+    }
+
+    #[test]
+    fn test_all_flags_combined() {
+        let mut reg = Registers::default();
+
+        reg.set_zero(true);
+        reg.set_subtract(true);
+        reg.set_half_carry(true);
+        reg.set_carry(true);
+        assert_eq!(reg.f, 0xF0);
+        assert_eq!(reg.af(), 0x00F0);
+
+        reg.set_af(0xFFFF);
+        assert!(reg.zero());
+        assert!(reg.subtract());
+        assert!(reg.half_carry());
+        assert!(reg.carry());
     }
 
     #[test]

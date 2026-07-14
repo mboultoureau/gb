@@ -27,7 +27,7 @@ jobs:
             api_key_secret: OPENROUTER_API_KEY
             label: OpenRouter
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: ${{ matrix.step_name }}
         env:
           API_KEY: ${{ secrets[matrix.api_key_secret] }}

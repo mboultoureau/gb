@@ -1,4 +1,4 @@
 fn main() {
-    let num = 42;
-    println!("Hello, world! {num} + 2 = {}", gb_core::add(num, 2));
+    let reg = gb_core::registers::Registers::default();
+    println!("Hello, world! AF = 0x{:04X}", reg.af());
 }

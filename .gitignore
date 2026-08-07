@@ -9,3 +9,7 @@ target/
 # OS
 .DS_Store
 Thumbs.db
+
+# Emulator
+roms/*
+!roms/test/

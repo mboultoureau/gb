@@ -3,7 +3,9 @@ db-urls = ["https://github.com/rustsec/advisory-db"]
 unmaintained = "all"
 
 [licenses]
-allow = ["MIT"]
+# Unicode-3.0: required by unicode-ident ("(MIT OR Apache-2.0) AND Unicode-3.0"),
+# a transitive dependency of proc-macro2 pulled in by clap and serde.
+allow = ["MIT", "Unicode-3.0"]
 
 [licenses.private]
 ignore = false

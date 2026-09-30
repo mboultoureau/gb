@@ -373,6 +373,32 @@ impl Header {
     }
 }
 
+/// A cartridge loaded into memory: the raw ROM image plus its parsed header.
+#[derive(Debug, Clone)]
+pub struct Cartridge {
+    rom: Vec<u8>,
+    header: Header,
+}
+
+impl Cartridge {
+    /// Validates the header and takes ownership of the ROM image.
+    pub fn from_rom(rom: Vec<u8>) -> Result<Self, HeaderError> {
+        let header = Header::read(&rom)?;
+        Ok(Self { rom, header })
+    }
+
+    #[must_use]
+    pub fn header(&self) -> &Header {
+        &self.header
+    }
+
+    /// Reads a byte from the ROM (`$0000-$7FFF`); out-of-range reads return `0xFF`.
+    #[must_use]
+    pub fn read(&self, addr: u16) -> u8 {
+        self.rom.get(usize::from(addr)).copied().unwrap_or(0xFF)
+    }
+}
+
 impl fmt::Display for Header {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         writeln!(
@@ -406,30 +432,31 @@ impl fmt::Display for Header {
 }
 
 #[cfg(test)]
+pub(crate) fn make_rom() -> Vec<u8> {
+    let mut rom = vec![0u8; MIN_ROM_LEN];
+
+    rom[0x0100..=0x0103].copy_from_slice(&[0x00, 0xC3, 0x50, 0x01]);
+    rom[0x0104..=0x0133].copy_from_slice(&NINTENDO_LOGO);
+    rom[0x0134..0x0138].copy_from_slice(b"TEST");
+    rom[0x0144..=0x0145].copy_from_slice(b"01");
+    rom[0x0146] = 0x00;
+    rom[0x0147] = 0x00;
+    rom[0x0148] = 0x00;
+    rom[0x0149] = 0x00;
+    rom[0x014A] = 0x01;
+    rom[0x014B] = 0x33;
+    rom[0x014C] = 0x00;
+
+    rom[0x014D] = Header::compute_header_checksum(&rom);
+    rom[0x014E] = 0x12;
+    rom[0x014F] = 0x34;
+
+    rom
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
-
-    fn make_rom() -> Vec<u8> {
-        let mut rom = vec![0u8; MIN_ROM_LEN];
-
-        rom[0x0100..=0x0103].copy_from_slice(&[0x00, 0xC3, 0x50, 0x01]);
-        rom[0x0104..=0x0133].copy_from_slice(&NINTENDO_LOGO);
-        rom[0x0134..0x0138].copy_from_slice(b"TEST");
-        rom[0x0144..=0x0145].copy_from_slice(b"01");
-        rom[0x0146] = 0x00;
-        rom[0x0147] = 0x00;
-        rom[0x0148] = 0x00;
-        rom[0x0149] = 0x00;
-        rom[0x014A] = 0x01;
-        rom[0x014B] = 0x33;
-        rom[0x014C] = 0x00;
-
-        rom[0x014D] = Header::compute_header_checksum(&rom);
-        rom[0x014E] = 0x12;
-        rom[0x014F] = 0x34;
-
-        rom
-    }
 
     #[test]
     fn reads_a_valid_header() {
@@ -533,5 +560,32 @@ mod tests {
         let mut wrong = NINTENDO_LOGO;
         wrong[0] = 0x00;
         assert!(!Header::validate_nintendo_logo(&wrong));
+    }
+
+    #[test]
+    fn cartridge_exposes_its_header() {
+        let cartridge = Cartridge::from_rom(make_rom()).expect("valid ROM");
+        assert_eq!(cartridge.header().title_str(), Some("TEST"));
+    }
+
+    #[test]
+    fn cartridge_rejects_an_invalid_rom() {
+        assert_eq!(
+            Cartridge::from_rom(vec![0; 16]).unwrap_err(),
+            HeaderError::TooSmall(16)
+        );
+    }
+
+    #[test]
+    fn cartridge_reads_rom_bytes() {
+        let cartridge = Cartridge::from_rom(make_rom()).expect("valid ROM");
+        assert_eq!(cartridge.read(0x0104), 0xCE);
+        assert_eq!(cartridge.read(0x0134), b'T');
+    }
+
+    #[test]
+    fn cartridge_read_past_the_end_returns_ff() {
+        let cartridge = Cartridge::from_rom(make_rom()).expect("valid ROM");
+        assert_eq!(cartridge.read(0x7FFF), 0xFF);
     }
 }
